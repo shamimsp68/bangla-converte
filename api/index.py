@@ -1,16 +1,13 @@
-from flask import Flask, request, jsonify
+from http.server import BaseHTTPRequestHandler
+import json
 import re
 
-app = Flask(__name__)
-
-# সম্পূর্ণ ও পরীক্ষিত ইউনিকোড-বিজয় কনভার্সন ডিকশনারি
+# ইউনিকোড ও বিজয় ম্যাপিং তালিকা
 MAP_PAIRS = [
-    # দীর্ঘ ও বিশেষ যুক্তবর্ণ
     ("c&iv", "প্রা"), ("c&†i", "প্রে"), ("cÖ", "প্র"), ("Î", "ত্র"), ("MÖ", "গ্র"),
     ("`Ö", "দ্র"), ("eÖ", "ব্র"), ("fÖ", "ভ্র"), ("kÖ", "শ্র"), ("mÖ", "স্র"),
     ("nÖ", "হ্র"), ("µ", "ক্র"), ("å", "ভ্র"),
 
-    # প্রচলিত যুক্তবর্ণ
     ("ÿ¥", "ক্ষ্ম"), ("ÿ", "ক্ষ"), ("Á", "জ্ঞ"), ("ò", "ষ্ণ"), ("Â", "ঞ্চ"),
     ("Ã", "ঞ্ছ"), ("Ä", "ঞ্জ"), ("Å", "ঞ্ঝ"), ("¼", "ঙ্ক"), ("½", "ঙ্খ"),
     ("¾", "ঙ্গ"), ("¿", "ঙ্ঘ"), ("”", "চ্চ"), ("•", "চ্ছ"), ("À", "জ্জ"),
@@ -30,11 +27,9 @@ MAP_PAIRS = [
     ("¯§", "স্ম"), ("mø", "স্ল"), ("¯", "স্ত"), ("nè", "হ্ণ"), ("ý", "হ্ন"),
     ("þ", "হ্ম"), ("n¬", "হ্ল"), ("nŸ", "হ্ব"),
 
-    # স্বরবর্ণ
     ("Av", "আ"), ("A", "অ"), ("B", "ই"), ("C", "ঈ"), ("D", "উ"), ("E", "ঊ"),
     ("F", "ঋ"), ("G", "এ"), ("H", "ঐ"), ("I", "ও"), ("J", "ঔ"),
 
-    # ব্যঞ্জনবর্ণ
     ("K", "ক"), ("L", "খ"), ("M", "গ"), ("N", "ঘ"), ("O", "ঙ"),
     ("P", "চ"), ("Q", "ছ"), ("R", "জ"), ("S", "ঝ"), ("T", "ঞ"),
     ("U", "ট"), ("V", "ঠ"), ("W", "ড"), ("X", "ঢ"), ("Y", "ণ"),
@@ -44,11 +39,9 @@ MAP_PAIRS = [
     ("m", "স"), ("n", "হ"), ("o", "ড়"), ("p", "ঢ়"), ("q", "য়"),
     ("r", "ৎ"), ("s", "ং"), ("t", "ঃ"), ("u", "ঁ"),
 
-    # কার-চিহ্ন
     ("v", "া"), ("w", "ি"), ("x", "ী"), ("y", "ু"), ("z", "ূ"),
     ("~", "ৃ"), ("†", "ে"), ("‰", "ৈ"), ("Š", "ৌ"), ("&", "্"),
 
-    # সংখ্যা ও যতিচিহ্ন
     ("0", "০"), ("1", "১"), ("2", "২"), ("3", "৩"), ("4", "৪"),
     ("5", "৫"), ("6", "৬"), ("7", "৭"), ("8", "৮"), ("9", "৯"),
     ("|", "।")
@@ -58,13 +51,10 @@ def bijoy_to_unicode(text):
     if not text:
         return ""
     res = text
-    # ও-কার এবং ঔ-কার
     res = re.sub(r'†([^†v]+)v', r'\1ো', res)
     res = re.sub(r'†([^†Š]+)Š', r'\1ৌ', res)
     res = res.replace("Av", "আ")
-    # রেফ
     res = re.sub(r'([A-Za-z0-9_`~&]+)©', r'র্\1', res)
-    # প্রি-কার (ি, ে, ৈ) ব্যঞ্জনের পরে সরানো
     res = re.sub(r'([w†‰])([A-Za-z0-9_`~&]+)', r'\2\1', res)
 
     for b, u in MAP_PAIRS:
@@ -79,15 +69,12 @@ def unicode_to_bijoy(text):
     if not text:
         return ""
     res = text
-    # ও-কার এবং ঔ-কার বিভাজন
     res = re.sub(r'([ক-হড়-য়](?:্[ক-হড়-য়])*(?:[্র্য])?)ো', r'†\1v', res)
     res = re.sub(r'([ক-হড়-য়](?:্[ক-হড়-য়])*(?:[্র্য])?)ৌ', r'†\1Š', res)
-    # রেফ
     res = re.sub(r'র্([ক-হড়-য়])', r'\1©', res)
-    # ফলা
     res = re.sub(r'([ক-হড়-য়])্র', r'\1Ö', res)
     res = re.sub(r'([ক-হড়-য়])্য', r'\1¨', res)
-    # প্রি-কার (ি, ে, ৈ) আগে নিয়ে আসা
+
     pre_kar_pattern = r'([ক-হড়-য়](?:্[ক-হড়-য়])*(?:[Ö¨])?)([িেৈ])'
     res = re.sub(pre_kar_pattern, r'\2\1', res)
 
@@ -97,26 +84,37 @@ def unicode_to_bijoy(text):
     res = res.replace("য়", "q")
     return res
 
-@app.route('/api/convert', methods=['POST'])
-def convert():
-    data = request.get_json(force=True, silent=True) or {}
-    text = data.get('text', '')
-    mode = data.get('mode', 'uni2bijoy')
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        
+        try:
+            payload = json.loads(post_data) if post_data else {}
+        except Exception:
+            payload = {}
 
-    if not text:
-        return jsonify({'result': ''})
+        text = payload.get('text', '')
+        mode = payload.get('mode', 'uni2bijoy')
 
-    try:
         if mode == 'uni2bijoy':
             result = unicode_to_bijoy(text)
         elif mode == 'bijoy2uni':
             result = bijoy_to_unicode(text)
         else:
-            return jsonify({'error': 'Invalid mode'}), 400
+            result = ""
 
-        return jsonify({'result': result})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        response_body = json.dumps({'result': result}).encode('utf-8')
 
-if __name__ == '__main__':
-    app.run(port=5000)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(response_body)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
