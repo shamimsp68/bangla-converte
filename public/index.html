@@ -1,0 +1,48 @@
+let debounceTimer;
+
+async function requestConversion() {
+  const isUniToBijoy = currentMode === 'uni2bijoy';
+  const inputText = isUniToBijoy 
+    ? document.getElementById("unicodeText").value 
+    : document.getElementById("bijoyText").value;
+
+  if (!inputText.trim()) {
+    document.getElementById(isUniToBijoy ? "bijoyText" : "unicodeText").value = "";
+    updateStats();
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/convert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: inputText, mode: currentMode })
+    });
+
+    const data = await response.json();
+    if (data.result !== undefined) {
+      if (isUniToBijoy) {
+        document.getElementById("bijoyText").value = data.result;
+      } else {
+        document.getElementById("unicodeText").value = data.result;
+      }
+    }
+  } catch (error) {
+    console.error("Conversion failed:", error);
+  } finally {
+    updateStats();
+  }
+}
+
+// টাইপ করার সময় API কল হ্যান্ডলার (Debounced)
+function onTextChange(origin) {
+  if (origin === 'unicode' && currentMode !== 'uni2bijoy') setMode('uni2bijoy');
+  if (origin === 'bijoy' && currentMode !== 'bijoy2uni') setMode('bijoy2uni');
+
+  if (document.getElementById("autoConvert").checked) {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(requestConversion, 250);
+  } else {
+    updateStats();
+  }
+}
